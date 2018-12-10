@@ -1,0 +1,226 @@
+package smpl.syntax;
+import smpl.semantics.*;
+
+import java_cup.runtime.*;
+import java.io.*;
+import java.util.*;
+
+/* Preliminaries to set up and use the scanner.  */
+parser code {:
+		SmplLexer lexer;
+
+		InputStreamReader in = null;
+
+		public SmplParser(InputStream is) {
+	        	in = new InputStreamReader(is);
+		}
+
+		public void report_error(String message, Object info) {
+		    System.err.println(message);
+		}
+
+		public void syntax_error(Symbol cur_token) {
+		    System.err.print("Line " + lexer.getLine() +
+				     " near char " + lexer.getChar() + ": ");
+		    report_error("Syntax error", cur_token);
+		    System.err.println ("Last token read is " +
+					 lexer.getText());
+		}
+	    :};
+
+init with {:
+		// Create a lexer that reads from
+		// supplied input stream or standard input
+		if (in == null)
+		   in = new InputStreamReader(System.in);
+		lexer = new SmplLexer(in);
+	  :};
+/*
+scan with {:
+		try {
+		    return lexer.next_token();
+		} catch (java.io.IOException ioe) {
+		    System.out.println ("Unrecognised token");
+		    System.out.println(ioe.getMessage());
+		    throw ioe;
+		}
+	  :};
+*/
+
+/* Terminals (tokens returned by the scanner). */
+
+// special symbols
+terminal LPAREN, RPAREN, COMMA, SEMI;
+
+terminal FUNDEF, PROC, CALL, LAZY;
+
+// arithmetic operators
+terminal PLUS, MINUS, MUL, DIV, MOD, ASSIGN;
+
+terminal LET, IF, ELSE, THEN;
+terminal LBRACE, RBRACE;
+
+terminal EQ, LT, GT, LE, GE;
+
+// graphical operators (optional)
+
+
+// terminals with values
+terminal Integer INTEGER;
+terminal String VARIABLE;
+
+/* Non terminals */
+non terminal SmplProgram program;
+non terminal StmtSequence stmtList;
+non terminal Statement stmt;
+non terminal StmtDefinition definition;
+
+non terminal StmtFunDefn funDefn;
+
+non terminal ArrayList<String> paramList;
+non terminal ArrayList<String> paramListE;
+non terminal ArrayList<IRExp> expList;
+non terminal ArrayList<IRExp> argsList;
+non terminal ArrayList<IRExp> expListE;
+non terminal IRExpFunCall funCall;
+non terminal IRExpIf ifexpr;
+
+non terminal StmtLet letStmt;
+non terminal ArrayList bindings;
+non terminal ArrayList bindingsAux;
+non terminal Binding binding;
+
+non terminal IRExp expression;
+non terminal IRExp comparison;
+non terminal IRExp arithExp;
+non terminal IRExp term;
+non terminal IRExp factor;
+non terminal empty;
+
+/* Grammar rules */
+
+program ::= stmtList:s {: RESULT = new SmplProgram(s); :};
+
+stmtList ::= stmtList:lst SEMI stmt:s {:
+		lst.add(s); 
+		RESULT = lst;
+		:} |
+	     stmt:s {:
+		RESULT = new StmtSequence(s);
+		:};
+
+/* ----- Add Statements below here ----- */
+
+letStmt ::= LET LPAREN bindings:bs RPAREN stmtList:body SEMI {: RESULT = new StmtLet(bs,body); :};
+
+binding ::= VARIABLE:v ASSIGN expression:e {:
+		RESULT = new Binding(v, e);
+	:};
+
+bindings ::= binding:b bindingsAux:bl {:
+	    	  bl.add(b);
+		  RESULT = bl;
+	     :} |
+		empty {: RESULT = new ArrayList<>(); :};
+
+bindingsAux ::= COMMA binding:b bindingsAux:bl {:
+	     	       bl.add(b);
+	     	       RESULT = bl;
+		:} |
+		empty {:
+		RESULT = new ArrayList<>();
+		:};
+
+stmt ::= definition:d {: RESULT = d; :} |
+	 letStmt:l {: RESULT = l; :} |
+	 funDefn:fd {: RESULT = fd; :} |
+	 expression:e {: RESULT = new StmtExpr(e); :};
+
+/* definition ::= VARIABLE:v ASSIGN expression:e {:
+		   RESULT = new StmtAssignment(v, e);
+		:}; */
+		
+definition ::= FUNDEF VARIABLE:v expression:e {: RESULT = new StmtDefinition(v,e); :} |
+		   FUNDEF VARIABLE:v funDefn:fn {: RESULT = new StmtDefinition(v,fn); :};
+
+
+funDefn ::= PROC LPAREN paramListE:pl RPAREN
+	    	   LBRACE stmtList:body RBRACE {:
+		   RESULT = new StmtFunDefn(pl, body);
+	    :}; 
+
+paramListE ::= paramList:pl {: RESULT = pl; :} |
+	       empty {: RESULT = new ArrayList<>(); :};
+
+paramList ::=  paramList:pl COMMA VARIABLE:v {:
+	          pl.add(v);
+		  RESULT = pl;
+	      :} | 
+	      paramList:pl COMMA LAZY VARIABLE:v {:
+	          pl.add("lazy" + v);
+		  RESULT = pl;
+	      :} |
+	      VARIABLE:v {:
+	          ArrayList<String> lst = new ArrayList<>();
+		  lst.add(v);
+	          RESULT = lst;
+	      	       :} |
+	     	LAZY VARIABLE:v {: ArrayList<String> lazylst = new ArrayList<>();
+	     		lazylst.add("lazy" + v);
+	     		RESULT = lazylst; :};
+	      	       
+/* ----- Add Expressions below here ----- */
+
+expression ::= arithExp:e {: RESULT = e; :} | 
+		   comparison:c {: RESULT = c; :} | 
+		   ifexpr:ife {: RESULT = ife; :};
+
+funCall ::= VARIABLE:v argsList:alst {: RESULT = new IRExpFunCall(v,alst); :} |
+		CALL LPAREN VARIABLE:v COMMA LPAREN expList:elst RPAREN RPAREN {: RESULT = new IRExpFunCall(v, elst); :} ;
+
+argsList ::= argsList:alst LPAREN expList:elst RPAREN {: alst.addAll(elst); RESULT = alst; :} | 
+		 LPAREN expList:elst RPAREN {: RESULT = elst; :};
+		
+expListE ::= expList:el {: RESULT = el; :} |
+	     empty {: RESULT = new ArrayList<>(); :};
+
+expList ::= expList:el COMMA expression:e {:
+	    	       el.add(e);
+ 		       RESULT = el;
+	    :} |
+	    expression:e {:
+	         ArrayList<IRExp> lst = new ArrayList<>();
+		 lst.add(e);
+		 RESULT = lst;
+	    :};
+
+ifexpr ::= IF comparison:pred THEN expression:conseq ELSE expression:alt {: RESULT = new IRExpIf(pred, conseq, alt); :};
+
+
+comparison ::= arithExp:x LT arithExp:e {: RESULT = new IRExpLt(x,e); :} |
+		   arithExp:x GT arithExp:e {: RESULT = new IRExpGt(x,e); :} | 
+		   arithExp:x LE arithExp:e {: RESULT = new IRExpLe(x,e); :} | 
+		   arithExp:x GE arithExp:e {: RESULT = new IRExpGe(x,e); :} | 
+		   arithExp:x EQ arithExp:e {: RESULT = new IRExpEq(x,e); :} ; 
+		
+
+arithExp ::= arithExp:e PLUS term:t {:
+			RESULT = new IRExpAdd(e, t); :} |
+		arithExp:e MINUS term:t {:
+			RESULT = new IRExpSub(e, t); :} |
+		term:t {: RESULT = t; :};
+
+term ::= term:t MUL factor:f {:
+		RESULT = new IRExpMul(t, f); :} |
+	 term:t DIV factor:f {:
+		RESULT = new IRExpDiv(t, f); :} |
+	 term:t MOD factor:f {:
+		RESULT = new IRExpMod(t, f); :} |
+	 factor:f {: RESULT = f; :};
+
+factor ::= INTEGER:ilit {: RESULT = new IRExpLit(ilit); :} |
+	   VARIABLE:var {: RESULT = new IRExpVar(var); :} |
+	   LPAREN arithExp:e RPAREN {: RESULT = e; :} |
+	   funCall:fc {: RESULT = fc; :};
+
+empty ::= ;
